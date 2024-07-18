@@ -36,4 +36,67 @@ app.post('/upload', upload.single('video'), (req, res) => {
     res.send({ path: filePath });
 });
 
+app.post('/trim', (req, res) => {
+    const { videoPath, startTime, duration } = req.body;
+
+    if (!videoPath || !fs.existsSync(videoPath)) {
+        return res.status(400).send({ error: 'Invalid video path' });
+    }
+
+    const absoluteVideoPath = path.resolve(videoPath);
+    const outputPath = path.join(__dirname, `videos/trimmed_${Date.now()}.mp4`);
+
+    console.log(`Trimming video at: ${absoluteVideoPath}`);
+    console.log(`Saving trimmed video to: ${outputPath}`);
+
+    ffmpeg(absoluteVideoPath)
+        .setStartTime(startTime)
+        .setDuration(duration)
+        .output(outputPath)
+        .on('end', () => {
+            console.log(`Trimmed video saved to: ${outputPath}`);
+            res.send({ success: true, outputPath });
+        })
+        .on('error', (err) => {
+            console.error(`Error trimming video: ${err.message}`);
+            res.status(500).send({ error: 'Error trimming video', message: err.message });
+        })
+        .run();
+});
+
+app.post('/merge', (req, res) => {
+    const { videoPaths } = req.body;
+
+    if (!videoPaths || !Array.isArray(videoPaths) || videoPaths.length < 2) {
+        return res.status(400).send({ error: 'Invalid video paths' });
+    }
+
+    for (const videoPath of videoPaths) {
+        if (!fs.existsSync(videoPath)) {
+            return res.status(400).send({ error: `Invalid video path: ${videoPath}` });
+        }
+    }
+
+    const outputPath = path.join(__dirname, `videos/merged_${Date.now()}.mp4`);
+    const mergedVideo = ffmpeg();
+
+    videoPaths.forEach(videoPath => {
+        mergedVideo.input(path.resolve(videoPath));
+    });
+
+    console.log(`Merging videos: ${videoPaths.join(', ')}`);
+    console.log(`Saving merged video to: ${outputPath}`);
+
+    mergedVideo
+        .on('end', () => {
+            console.log(`Merged video saved to: ${outputPath}`);
+            res.send({ success: true, outputPath });
+        })
+        .on('error', (err) => {
+            console.error(`Error merging videos: ${err.message}`);
+            res.status(500).send({ error: 'Error merging videos', message: err.message });
+        })
+        .mergeToFile(outputPath, path.join(__dirname, 'temp'));
+});
+
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
