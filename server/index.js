@@ -99,4 +99,69 @@ app.post('/merge', (req, res) => {
         .mergeToFile(outputPath, path.join(__dirname, 'temp'));
 });
 
+const crypto = require('crypto');
+
+const tokens = new Map();
+
+
+
+app.get('/stream', (req, res) => {
+    const { videoPath, token } = req.query;
+
+    // Validate the token
+    if (token) {
+        const tokenData = tokens.get(token);
+        if (tokenData && Date.now() - tokenData.timestamp < 1 * 60 * 1000) { // Valid for 1 minute
+            // Token is valid
+        } else {
+            return res.status(403).send({ error: 'Token expired or invalid' });
+        }
+    } else {
+        return res.status(400).send({ error: 'Token is required' });
+    }
+
+    if (!videoPath || !fs.existsSync(videoPath)) {
+        return res.status(400).send({ error: 'Invalid video path' });
+    }
+
+    const absoluteVideoPath = path.resolve(videoPath);
+    const stats = fs.statSync(absoluteVideoPath);
+    const fileSize = stats.size;
+
+    // Set headers for video streaming
+    res.writeHead(200, {
+        'Content-Type': 'video/mp4',
+        'Content-Length': Math.min(fileSize, 1 * 1024 * 1024), // Limit to 1 MB (5 seconds of data)
+        'Accept-Ranges': 'bytes',
+    });
+
+    const readStream = fs.createReadStream(absoluteVideoPath, { start: 0, end: Math.min(fileSize, 1 * 1024 * 1024) - 1 });
+
+    // Pause the stream after 1 minute or when the token expires
+    const pauseStream = setTimeout(() => {
+        readStream.destroy(); // Stop the stream
+        res.end(); // Close the response
+    }, 1 * 60 * 1000); // 1 minute
+
+    readStream.pipe(res);
+
+    readStream.on('error', (err) => {
+        console.error(`Error streaming video: ${err.message}`);
+        clearTimeout(pauseStream); // Clear timeout on error
+        res.status(500).send({ error: 'Error streaming video', message: err.message });
+    });
+
+    // Cleanup when response ends
+    res.on('finish', () => {
+        clearTimeout(pauseStream);
+    });
+});
+
+app.get('/generate-token', (req, res) => {
+    const token = crypto.randomBytes(16).toString('hex');
+    tokens.set(token, { timestamp: Date.now() });
+
+    res.send({ token });
+});
+
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
