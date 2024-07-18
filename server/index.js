@@ -3,9 +3,10 @@ const multer = require('multer');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const ffmpeg = require('fluent-ffmpeg');
 
 
-const app=express();
+const app = express();
 app.use(cors());
 const PORT = 5000;
 
@@ -31,9 +32,17 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 app.post('/upload', upload.single('video'), (req, res) => {
-    const filePath = path.join(__dirname, req.file.path);
-    console.log(`File uploaded to: ${filePath}`);
-    res.send({ path: filePath });
+    try {
+        if (!req.file) {
+            return res.status(400).send({ error: 'No file uploaded' });
+        }
+        const filePath = path.join(__dirname, req.file.path);
+        console.log(`File uploaded to: ${filePath}`);
+        res.send({ path: filePath });
+    } catch (error) {
+        console.error('Error in /upload:', error);
+        res.status(500).send({ error: 'Internal server error' });
+    }
 });
 
 app.post('/trim', (req, res) => {
@@ -78,90 +87,45 @@ app.post('/merge', (req, res) => {
     }
 
     const outputPath = path.join(__dirname, `videos/merged_${Date.now()}.mp4`);
-    const mergedVideo = ffmpeg();
+    const tempDir = path.join(__dirname, 'temp');
+    const listFilePath = path.join(tempDir, 'file_list.txt');
 
-    videoPaths.forEach(videoPath => {
-        mergedVideo.input(path.resolve(videoPath));
-    });
+    // Ensure temp directory exists
+    if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir);
+    }
+
+    // Create a text file with the list of input videos
+    const fileList = videoPaths.map(path => `file '${path}'`).join('\n');
+    fs.writeFileSync(listFilePath, fileList);
 
     console.log(`Merging videos: ${videoPaths.join(', ')}`);
     console.log(`Saving merged video to: ${outputPath}`);
 
-    mergedVideo
+    ffmpeg()
+        .input(listFilePath)
+        .inputOptions(['-f', 'concat', '-safe', '0'])
+        .outputOptions('-c copy')  // This copies the codec without re-encoding
+        .output(outputPath)
+        .on('start', (command) => {
+            console.log('FFmpeg command:', command);
+        })
         .on('end', () => {
             console.log(`Merged video saved to: ${outputPath}`);
             res.send({ success: true, outputPath });
+
+            // Clean up temp directory
+            fs.unlinkSync(listFilePath);
         })
         .on('error', (err) => {
             console.error(`Error merging videos: ${err.message}`);
             res.status(500).send({ error: 'Error merging videos', message: err.message });
         })
-        .mergeToFile(outputPath, path.join(__dirname, 'temp'));
+        .run();
 });
 
-const crypto = require('crypto');
+const startServer = () => {
+    return app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  };
 
-const tokens = new Map();
-
-
-
-app.get('/stream', (req, res) => {
-    const { videoPath, token } = req.query;
-
-    // Validate the token
-    if (token) {
-        const tokenData = tokens.get(token);
-        if (tokenData && Date.now() - tokenData.timestamp < 1 * 60 * 1000) { // Valid for 1 minute
-            // Token is valid
-        } else {
-            return res.status(403).send({ error: 'Token expired or invalid' });
-        }
-    } else {
-        return res.status(400).send({ error: 'Token is required' });
-    }
-
-    if (!videoPath || !fs.existsSync(videoPath)) {
-        return res.status(400).send({ error: 'Invalid video path' });
-    }
-
-    const absoluteVideoPath = path.resolve(videoPath);
-    const stats = fs.statSync(absoluteVideoPath);
-    const fileSize = stats.size;
-
-    // Set headers for video streaming
-    res.writeHead(200, {
-        'Content-Type': 'video/mp4',
-        'Content-Length': Math.min(fileSize, 1 * 1024 * 1024), // Limit to 1 MB (5 seconds of data)
-        'Accept-Ranges': 'bytes',
-    });
-
-    const readStream = fs.createReadStream(absoluteVideoPath, { start: 0, end: Math.min(fileSize, 1 * 1024 * 1024) - 1 });
-
-    // Pause the stream after 1 minute or when the token expires
-    const pauseStream = setTimeout(() => {
-        readStream.destroy(); // Stop the stream
-        res.end(); // Close the response
-    }, 1 * 60 * 1000); // 1 minute
-
-    readStream.pipe(res);
-
-    readStream.on('error', (err) => {
-        console.error(`Error streaming video: ${err.message}`);
-        clearTimeout(pauseStream); // Clear timeout on error
-        res.status(500).send({ error: 'Error streaming video', message: err.message });
-    });
-
-    // Cleanup when response ends
-    res.on('finish', () => {
-        clearTimeout(pauseStream);
-    });
-});
-
-app.get('/generate-token', (req, res) => {
-    const token = crypto.randomBytes(16).toString('hex');
-    tokens.set(token, { timestamp: Date.now() });
-
-    res.send({ token });
-});
-
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+module.exports = {app, startServer};
