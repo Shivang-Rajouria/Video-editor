@@ -20,7 +20,7 @@ const VideoUploader = () => {
         formData.append('video', selectedFile);
 
         try {
-            const response = await axios.post('http://localhost:5000/upload', formData);
+            const response = await axios.post('https://video-editor-qegf.onrender.com/upload', formData);
             setVideoPaths([...videoPaths, response.data.path]);
             setMessage('Video uploaded successfully.');
         } catch (error) {
@@ -33,7 +33,7 @@ const VideoUploader = () => {
         const videoPath = videoPaths[0]; // Assuming we trim the first video
 
         try {
-            const response = await axios.post('http://localhost:5000/trim', {
+            const response = await axios.post('https://video-editor-qegf.onrender.com/trim', {
                 videoPath,
                 startTime,
                 duration,
@@ -51,7 +51,7 @@ const VideoUploader = () => {
         }
 
         try {
-            const response = await axios.post('http://localhost:5000/merge', {
+            const response = await axios.post('https://video-editor-qegf.onrender.com/merge', {
                 videoPaths,
             });
             setMessage(`Merged video saved at: ${response.data.outputPath}`);
