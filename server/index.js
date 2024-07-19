@@ -4,11 +4,15 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
-
+const { sequelize, Video, initDB } = require('./db');
 
 const app = express();
 app.use(cors());
 const PORT = 5000;
+
+initDB().then(() => {
+  console.log('Database initialized');
+});
 
 if (!fs.existsSync(path.join(__dirname, 'uploads'))) {
     fs.mkdirSync(path.join(__dirname, 'uploads'));
@@ -31,13 +35,17 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-app.post('/upload', upload.single('video'), (req, res) => {
+app.post('/upload', upload.single('video'), async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).send({ error: 'No file uploaded' });
         }
         const filePath = path.join(__dirname, req.file.path);
         console.log(`File uploaded to: ${filePath}`);
+        
+        // Save metadata to SQLite
+        await Video.create({ path: filePath, type: 'uploaded' });
+
         res.send({ path: filePath });
     } catch (error) {
         console.error('Error in /upload:', error);
@@ -45,7 +53,7 @@ app.post('/upload', upload.single('video'), (req, res) => {
     }
 });
 
-app.post('/trim', (req, res) => {
+app.post('/trim', async (req, res) => {
     const { videoPath, startTime, duration } = req.body;
 
     if (!videoPath || !fs.existsSync(videoPath)) {
@@ -62,8 +70,12 @@ app.post('/trim', (req, res) => {
         .setStartTime(startTime)
         .setDuration(duration)
         .output(outputPath)
-        .on('end', () => {
+        .on('end', async () => {
             console.log(`Trimmed video saved to: ${outputPath}`);
+            
+            // Save metadata to SQLite
+            await Video.create({ path: outputPath, type: 'trimmed' });
+
             res.send({ success: true, outputPath });
         })
         .on('error', (err) => {
@@ -73,7 +85,7 @@ app.post('/trim', (req, res) => {
         .run();
 });
 
-app.post('/merge', (req, res) => {
+app.post('/merge', async (req, res) => {
     const { videoPaths } = req.body;
 
     if (!videoPaths || !Array.isArray(videoPaths) || videoPaths.length < 2) {
@@ -110,8 +122,12 @@ app.post('/merge', (req, res) => {
         .on('start', (command) => {
             console.log('FFmpeg command:', command);
         })
-        .on('end', () => {
+        .on('end', async () => {
             console.log(`Merged video saved to: ${outputPath}`);
+            
+            // Save metadata to SQLite
+            await Video.create({ path: outputPath, type: 'merged' });
+
             res.send({ success: true, outputPath });
 
             // Clean up temp directory
@@ -126,6 +142,6 @@ app.post('/merge', (req, res) => {
 
 const startServer = () => {
     return app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-  };
+};
 
-module.exports = {app, startServer};
+module.exports = { app, startServer };
