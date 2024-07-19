@@ -53,7 +53,7 @@ This application allows users to upload videos, trim them, and merge multiple vi
 
 4. Run the Express server:
    ```
-   node index.js
+   node server.js
    ```
 
 The server should now be running on `http://localhost:5000`.
